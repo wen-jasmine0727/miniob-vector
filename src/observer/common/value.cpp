@@ -14,6 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/value.h"
 
+#include <cmath>
+#include <sstream>
+
 #include "common/lang/comparator.h"
 #include "common/lang/exception.h"
 #include "common/lang/sstream.h"
@@ -28,8 +31,7 @@ Value::Value(bool val) { set_boolean(val); }
 
 Value::Value(const char *s, int len /*= 0*/) { set_string(s, len); }
 
-Value::Value(const string_t& s) { set_string(s.data(), s.size()); }
-
+Value::Value(const string_t &s) { set_string(s.data(), s.size()); }
 
 Value::Value(const Value &other)
 {
@@ -39,6 +41,14 @@ Value::Value(const Value &other)
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
+    } break;
+
+    case AttrType::VECTORS: {
+      if (own_data_ && other.value_.pointer_value_ != nullptr && length_ > 0) {
+        int byte_len = length_ * sizeof(float);
+        this->value_.pointer_value_ = new char[byte_len];
+        memcpy(this->value_.pointer_value_, other.value_.pointer_value_, byte_len);
+      }
     } break;
 
     default: {
@@ -69,6 +79,14 @@ Value &Value::operator=(const Value &other)
   switch (this->attr_type_) {
     case AttrType::CHARS: {
       set_string_from_other(other);
+    } break;
+
+    case AttrType::VECTORS: {
+      if (own_data_ && other.value_.pointer_value_ != nullptr && length_ > 0) {
+        int byte_len = length_ * sizeof(float);
+        this->value_.pointer_value_ = new char[byte_len];
+        memcpy(this->value_.pointer_value_, other.value_.pointer_value_, byte_len);
+      }
     } break;
 
     default: {
@@ -102,6 +120,12 @@ void Value::reset()
         value_.pointer_value_ = nullptr;
       }
       break;
+    case AttrType::VECTORS:
+      if (own_data_ && value_.pointer_value_ != nullptr) {
+        delete[] value_.pointer_value_;
+        value_.pointer_value_ = nullptr;
+      }
+      break;
     default: break;
   }
 
@@ -127,6 +151,15 @@ void Value::set_data(char *data, int length)
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
       length_            = length;
+    } break;
+    case AttrType::VECTORS: {
+      // For vectors, 'data' points to raw float array, 'length' is the byte size
+      int dim = length / static_cast<int>(sizeof(float));
+      if (dim > 0) {
+        set_vector((const float *)data, dim);
+      } else {
+        reset();
+      }
     } break;
     default: {
       LOG_WARN("unknown data type: %d", attr_type_);
@@ -188,7 +221,85 @@ void Value::set_empty_string(int len)
   length_               = len;
   memset(value_.pointer_value_, 0, len);
   value_.pointer_value_[len] = '\0';
-  
+}
+
+void Value::set_vector(const float *data, int dim)
+{
+  reset();
+  attr_type_ = AttrType::VECTORS;
+  if (data == nullptr || dim <= 0) {
+    value_.pointer_value_ = nullptr;
+    length_               = 0;
+  } else {
+    own_data_ = true;
+    int byte_len = dim * sizeof(float);
+    value_.pointer_value_ = new char[byte_len];
+    length_               = dim;
+    memcpy(value_.pointer_value_, data, byte_len);
+  }
+}
+
+void Value::set_vector_from_str(const string &str)
+{
+  reset();
+  attr_type_ = AttrType::VECTORS;
+
+  // Parse string format: "[1, 2, 3]" or "[1.0,2.0,3.0]"
+  string s = str;
+  // Trim whitespace
+  size_t start = s.find_first_not_of(" \t\n\r");
+  size_t end   = s.find_last_not_of(" \t\n\r");
+  if (start == string::npos) {
+    value_.pointer_value_ = nullptr;
+    length_               = 0;
+    return;
+  }
+  s = s.substr(start, end - start + 1);
+
+  // Remove brackets
+  if (s.front() == '[') s = s.substr(1);
+  if (s.back() == ']') s.pop_back();
+
+  // Parse comma-separated floats
+  vector<float> values;
+  stringstream  ss(s);
+  string        token;
+  while (getline(ss, token, ',')) {
+    // Trim token
+    size_t ts = token.find_first_not_of(" \t\n\r");
+    size_t te = token.find_last_not_of(" \t\n\r");
+    if (ts == string::npos) continue;
+    token = token.substr(ts, te - ts + 1);
+    try {
+      values.push_back(stof(token));
+    } catch (const exception &ex) {
+      LOG_WARN("failed to parse vector element: %s", token.c_str());
+      value_.pointer_value_ = nullptr;
+      length_               = 0;
+      return;
+    }
+  }
+
+  if (values.empty()) {
+    value_.pointer_value_ = nullptr;
+    length_               = 0;
+    return;
+  }
+
+  own_data_ = true;
+  int dim = values.size();
+  int byte_len = dim * sizeof(float);
+  value_.pointer_value_ = new char[byte_len];
+  length_               = dim;
+  memcpy(value_.pointer_value_, values.data(), byte_len);
+}
+
+const float *Value::get_vector_data() const
+{
+  if (attr_type_ != AttrType::VECTORS) {
+    return nullptr;
+  }
+  return reinterpret_cast<const float *>(value_.pointer_value_);
 }
 
 void Value::set_value(const Value &value)
@@ -205,6 +316,9 @@ void Value::set_value(const Value &value)
     } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
+    } break;
+    case AttrType::VECTORS: {
+      set_vector(value.get_vector_data(), value.vector_dim());
     } break;
     default: {
       ASSERT(false, "got an invalid value type");
@@ -226,6 +340,9 @@ char *Value::data() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
+      return value_.pointer_value_;
+    } break;
+    case AttrType::VECTORS: {
       return value_.pointer_value_;
     } break;
     default: {

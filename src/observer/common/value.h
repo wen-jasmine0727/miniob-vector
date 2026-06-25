@@ -120,6 +120,12 @@ public:
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
 
+  // Vector type support
+  void         set_vector(const float *data, int dim);
+  void         set_vector_from_str(const string &str);
+  const float *get_vector_data() const;
+  int          vector_dim() const { return length_; }
+
 private:
   AttrType attr_type_ = AttrType::UNDEFINED;
   int      length_    = 0;

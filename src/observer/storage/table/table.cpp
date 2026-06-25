@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include <limits.h>
 #include <string.h>
+#include <cstdio>
 
 #include "common/defs.h"
 #include "common/lang/string.h"
@@ -296,4 +297,42 @@ Index *Table::find_index_by_field(const char *field_name) const
 RC Table::sync()
 {
   return engine_->sync();
+}
+
+RC Table::destroy(const char *meta_file_path, const char *data_file_path)
+{
+  if (engine_) {
+    RC rc = engine_->sync();
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to sync table before destroy. table=%s, rc=%s", name(), strrc(rc));
+      return rc;
+    }
+
+    engine_.reset();
+  }
+
+  for (int i = 0; i < table_meta_.index_num(); i++) {
+    const IndexMeta *index_meta = table_meta_.index(i);
+    if (index_meta == nullptr) {
+      continue;
+    }
+
+    string index_file_path = table_index_file(db_->path().c_str(), table_meta_.name(), index_meta->name());
+    if (remove(index_file_path.c_str()) != 0) {
+      LOG_ERROR("Failed to delete index file. file=%s, errno=%d:%s", index_file_path.c_str(), errno, strerror(errno));
+      return RC::IOERR_WRITE;
+    }
+  }
+
+  if (remove(data_file_path) != 0) {
+    LOG_ERROR("Failed to delete data file. file=%s, errno=%d:%s", data_file_path, errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  if (remove(meta_file_path) != 0) {
+    LOG_ERROR("Failed to delete meta file. file=%s, errno=%d:%s", meta_file_path, errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  return RC::SUCCESS;
 }

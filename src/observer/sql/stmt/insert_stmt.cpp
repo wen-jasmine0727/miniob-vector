@@ -47,6 +47,40 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     return RC::SCHEMA_FIELD_MISSING;
   }
 
+  // Validate each value matches its corresponding field type and vector dimension
+  int field_idx = table_meta.sys_field_num();
+  for (int i = 0; i < value_num; i++) {
+    const FieldMeta *field = table_meta.field(field_idx + i);
+    if (field == nullptr) {
+      LOG_WARN("field not found at index %d", field_idx + i);
+      return RC::SCHEMA_FIELD_MISSING;
+    }
+
+    AttrType field_type = field->type();
+    AttrType value_type = values[i].attr_type();
+
+    if (field_type == AttrType::VECTORS) {
+      // Vector field must have vector value
+      if (value_type != AttrType::VECTORS) {
+        LOG_WARN("type mismatch. field=%s, field_type=vectors, value_type=%d",
+            field->name(), (int)value_type);
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      }
+      // Check vector dimension matches (field->len() is byte count, value_dim is number of floats)
+      int field_dim = field->len() / static_cast<int>(sizeof(float));
+      int value_dim = values[i].vector_dim();
+      if (field_dim != value_dim) {
+        LOG_WARN("vector dimension mismatch. field=%s, field_dim=%d, value_dim=%d",
+            field->name(), field_dim, value_dim);
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      }
+    } else if (value_type == AttrType::VECTORS) {
+      // Non-vector field cannot have vector value
+      LOG_WARN("type mismatch. field=%s is not vector type but got vector value", field->name());
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+  }
+
   // everything alright
   stmt = new InsertStmt(table, values, value_num);
   return RC::SUCCESS;

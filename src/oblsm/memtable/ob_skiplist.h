@@ -167,11 +167,11 @@ private:
   // values are ok.
   atomic<int> max_height_;  // Height of the entire list
 
-  static common::RandomGenerator rnd;
+  static thread_local common::RandomGenerator rnd;
 };
 
 template <typename Key, class ObComparator>
-common::RandomGenerator ObSkipList<Key, ObComparator>::rnd = common::RandomGenerator();
+thread_local common::RandomGenerator ObSkipList<Key, ObComparator>::rnd;
 
 // Implementation details follow
 template <typename Key, class ObComparator>
@@ -306,8 +306,23 @@ template <typename Key, class ObComparator>
 typename ObSkipList<Key, ObComparator>::Node *ObSkipList<Key, ObComparator>::find_greater_or_equal(
     const Key &key, Node **prev) const
 {
-  // your code here
-  return nullptr;
+  Node *x     = head_;
+  int   level = get_max_height() - 1;
+  while (true) {
+    Node *next = x->next(level);
+    if (next == nullptr || compare_(next->key, key) >= 0) {
+      if (prev != nullptr) {
+        prev[level] = x;
+      }
+      if (level == 0) {
+        return next;
+      } else {
+        level--;
+      }
+    } else {
+      x = next;
+    }
+  }
 }
 
 template <typename Key, class ObComparator>
@@ -376,12 +391,85 @@ ObSkipList<Key, ObComparator>::~ObSkipList()
 
 template <typename Key, class ObComparator>
 void ObSkipList<Key, ObComparator>::insert(const Key &key)
-{}
+{
+  Node *prev[kMaxHeight];
+  Node *x = find_greater_or_equal(key, prev);
+  ASSERT(x == nullptr || !equal(key, x->key), "key must not already exist in the list");
+
+  int height = random_height();
+  if (height > get_max_height()) {
+    for (int i = get_max_height(); i < height; i++) {
+      prev[i] = head_;
+    }
+    // Relaxed store is fine — stale reads of max_height_ are acceptable
+    max_height_.store(height, std::memory_order_relaxed);
+  }
+
+  x = new_node(key, height);
+  for (int i = 0; i < height; i++) {
+    x->nobarrier_set_next(i, prev[i]->nobarrier_next(i));
+    prev[i]->set_next(i, x);
+  }
+}
 
 template <typename Key, class ObComparator>
 void ObSkipList<Key, ObComparator>::insert_concurrently(const Key &key)
 {
-  // your code here
+  int    height = random_height();
+  Node  *prev[kMaxHeight];
+  Node  *succ[kMaxHeight];
+
+  while (true) {
+    // Find the insertion position and record predecessors
+    Node *x = find_greater_or_equal(key, prev);
+    (void)x;  // x may or may not already exist; we insert regardless
+
+    // Capture successors from the current predecessors
+    for (int i = 0; i < kMaxHeight; i++) {
+      succ[i] = prev[i]->nobarrier_next(i);
+    }
+
+    // Update max_height_ if our node is taller than the current max
+    if (height > get_max_height()) {
+      int old_max = get_max_height();
+      for (int i = old_max; i < height; i++) {
+        prev[i] = head_;
+      }
+      // CAS to update max_height_; if it fails another thread already did it
+      max_height_.compare_exchange_weak(old_max, height);
+    }
+
+    // Create the new node and initialize its next pointers
+    Node *node = new_node(key, height);
+    for (int i = 0; i < height; i++) {
+      node->nobarrier_set_next(i, succ[i]);
+    }
+
+    // Step 1: Insert at level 0 using CAS
+    if (!prev[0]->cas_next(0, succ[0], node)) {
+      // Level 0 CAS failed — another thread modified the list, retry from scratch
+      continue;
+    }
+
+    // Step 2: Insert at higher levels
+    for (int level = 1; level < height; level++) {
+      while (true) {
+        if (prev[level]->cas_next(level, succ[level], node)) {
+          break;  // Successful at this level, move to next
+        }
+        // CAS failed — re-find position for this and higher levels
+        find_greater_or_equal(key, prev);
+        for (int i = level; i < kMaxHeight; i++) {
+          succ[i] = prev[i]->nobarrier_next(i);
+        }
+        // Update node's next pointers to match new successors
+        for (int i = level; i < height; i++) {
+          node->nobarrier_set_next(i, succ[i]);
+        }
+      }
+    }
+    return;  // Successfully inserted at all levels
+  }
 }
 
 template <typename Key, class ObComparator>

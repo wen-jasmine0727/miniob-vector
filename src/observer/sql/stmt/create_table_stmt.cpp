@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/types.h"
 #include "sql/stmt/create_table_stmt.h"
+#include "sql/parser/parse_defs.h"
 #include "event/sql_debug.h"
 
 RC CreateTableStmt::create(Db *db, const CreateTableSqlNode &create_table, Stmt *&stmt)
@@ -23,6 +24,22 @@ RC CreateTableStmt::create(Db *db, const CreateTableSqlNode &create_table, Stmt 
   if (storage_format == StorageFormat::UNKNOWN_FORMAT) {
     return RC::INVALID_ARGUMENT;
   }
+
+  // Validate vector dimension for each attribute
+  for (const auto &attr : create_table.attr_infos) {
+    if (attr.type == AttrType::VECTORS) {
+      size_t dim = attr.length / sizeof(float);
+      if (dim == 0) {
+        LOG_WARN("vector dimension cannot be 0");
+        return RC::INVALID_ARGUMENT;
+      }
+      if (dim > VECTOR_MAX_DIM) {
+        LOG_WARN("vector dimension %zu exceeds maximum %zu", dim, VECTOR_MAX_DIM);
+        return RC::INVALID_ARGUMENT;
+      }
+    }
+  }
+
   stmt = new CreateTableStmt(create_table.relation_name, create_table.attr_infos, create_table.primary_keys, storage_format);
   sql_debug("create table statement: table name %s", create_table.relation_name.c_str());
   return RC::SUCCESS;

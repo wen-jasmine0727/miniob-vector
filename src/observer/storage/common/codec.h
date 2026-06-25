@@ -433,6 +433,16 @@ public:
           LOG_WARN("append failed");
         }
         break;
+      case AttrType::VECTORS: {
+        // Encode vector: dimension (uint32) + raw float array
+        int dim = val.vector_dim();
+        OrderedCode::append(dst, (int64_t)dim);
+        const float *data = val.get_vector_data();
+        if (data != nullptr && dim > 0) {
+          dst.insert(dst.end(), reinterpret_cast<const byte_t *>(data),
+              reinterpret_cast<const byte_t *>(data) + dim * sizeof(float));
+        }
+      } break;
       default: return RC::INVALID_ARGUMENT;
     }
     return rc;

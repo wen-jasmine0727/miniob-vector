@@ -12,6 +12,10 @@ See the Mulan PSL v2 for more details. */
 
 #include <stdint.h>
 #include <cstddef>
+#include <list>
+#include <unordered_map>
+#include <mutex>
+#include <utility>
 
 namespace oceanbase {
 
@@ -48,7 +52,18 @@ public:
    * @param value A reference to store the value associated with the key.
    * @return `true` if the key is found and the value is retrieved; `false` otherwise.
    */
-  bool get(const KeyType &key, ValueType &value) { return false; }
+  bool get(const KeyType &key, ValueType &value)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return false;
+    }
+    // Move to front (most recently used)
+    lru_list_.splice(lru_list_.begin(), lru_list_, it->second);
+    value = it->second->second;
+    return true;
+  }
 
   /**
    * @brief Inserts a key-value pair into the cache.
@@ -60,7 +75,26 @@ public:
    * @param key The key to insert into the cache.
    * @param value The value to associate with the specified key.
    */
-  void put(const KeyType &key, const ValueType &value) {}
+  void put(const KeyType &key, const ValueType &value)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = map_.find(key);
+    if (it != map_.end()) {
+      // Key exists: update value and move to front
+      it->second->second = value;
+      lru_list_.splice(lru_list_.begin(), lru_list_, it->second);
+      return;
+    }
+    // Key doesn't exist: insert new entry
+    if (lru_list_.size() >= capacity_) {
+      // Evict least recently used (back of list)
+      auto last = lru_list_.back();
+      map_.erase(last.first);
+      lru_list_.pop_back();
+    }
+    lru_list_.emplace_front(key, value);
+    map_[key] = lru_list_.begin();
+  }
 
   /**
    * @brief Checks whether the specified key exists in the cache.
@@ -68,13 +102,41 @@ public:
    * @param key The key to check in the cache.
    * @return `true` if the key exists; `false` otherwise.
    */
-  bool contains(const KeyType &key) const { return false; }
+  bool contains(const KeyType &key) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return map_.find(key) != map_.end();
+  }
+
+  /**
+   * @brief Returns the current number of entries in the cache.
+   */
+  size_t size() const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return lru_list_.size();
+  }
 
 private:
   /**
    * @brief The maximum number of elements the cache can hold.
    */
   size_t capacity_;
+
+  /**
+   * @brief LRU list: front is most recently used, back is least recently used.
+   */
+  std::list<std::pair<KeyType, ValueType>> lru_list_;
+
+  /**
+   * @brief Map from key to iterator in the LRU list for O(1) lookup.
+   */
+  std::unordered_map<KeyType, typename std::list<std::pair<KeyType, ValueType>>::iterator> map_;
+
+  /**
+   * @brief Mutex for thread safety.
+   */
+  mutable std::mutex mutex_;
 };
 
 /**
@@ -91,7 +153,7 @@ private:
 template <typename Key, typename Value>
 ObLRUCache<Key, Value> *new_lru_cache(uint32_t capacity)
 {
-  return nullptr;
+  return new ObLRUCache<Key, Value>(capacity);
 }
 
 }  // namespace oceanbase

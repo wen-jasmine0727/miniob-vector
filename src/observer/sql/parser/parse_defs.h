@@ -22,6 +22,10 @@ See the Mulan PSL v2 for more details. */
 
 class Expression;
 
+// Vector type constants
+static constexpr size_t VECTOR_DEFAULT_DIM = 2048;
+static constexpr size_t VECTOR_MAX_DIM     = 16383;
+
 /**
  * @defgroup SQLParser SQL Parser
  */

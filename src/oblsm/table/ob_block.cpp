@@ -16,7 +16,36 @@ namespace oceanbase {
 
 RC ObBlock::decode(const string &data)
 {
-  return RC::UNIMPLEMENTED;
+  if (data.size() < sizeof(uint32_t)) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // Read the "offset start" position from the last 4 bytes
+  const char   *data_ptr          = data.c_str();
+  uint32_t      total_size         = data.size();
+  uint32_t      offset_start_pos   = total_size - sizeof(uint32_t);
+  uint32_t      data_end_pos       = get_numeric<uint32_t>(data_ptr + offset_start_pos);
+
+  if (data_end_pos > offset_start_pos) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // Read offset_count at data_end_pos
+  uint32_t      offset_count_pos   = data_end_pos;
+  uint32_t      offset_count       = get_numeric<uint32_t>(data_ptr + offset_count_pos);
+
+  // Read all offsets
+  const char   *offsets_ptr        = data_ptr + offset_count_pos + sizeof(uint32_t);
+  offsets_.clear();
+  for (uint32_t i = 0; i < offset_count; i++) {
+    uint32_t offset = get_numeric<uint32_t>(offsets_ptr + i * sizeof(uint32_t));
+    offsets_.push_back(offset);
+  }
+
+  // Store the data portion (key-value entries only)
+  data_ = string(data_ptr, data_end_pos);
+
+  return RC::SUCCESS;
 }
 
 string_view ObBlock::get_entry(uint32_t offset) const

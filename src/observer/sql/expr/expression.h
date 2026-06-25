@@ -47,6 +47,7 @@ enum class ExprType
   CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
   ARITHMETIC,   ///< 算术运算
   AGGREGATION,  ///< 聚合运算
+  VECTOR_DISTANCE,  ///< 向量距离计算
 };
 
 /**
@@ -527,4 +528,38 @@ public:
 private:
   Type                   aggregate_type_;
   unique_ptr<Expression> child_;
+};
+
+/**
+ * @brief 向量距离表达式
+ * @ingroup Expression
+ * @details 计算两个向量之间的距离。支持 COSINE、DOT、EUCLIDEAN 三种方法。
+ * 第一个参数是左向量表达式，第二个参数是右向量表达式，第三个参数是距离方法字符串。
+ */
+class VectorDistanceExpr : public Expression
+{
+public:
+  VectorDistanceExpr(unique_ptr<Expression> left, unique_ptr<Expression> right, const string &method)
+      : left_(std::move(left)), right_(std::move(right)), method_(method)
+  {}
+  virtual ~VectorDistanceExpr() = default;
+
+  unique_ptr<Expression> copy() const override
+  {
+    return make_unique<VectorDistanceExpr>(left_->copy(), right_->copy(), method_);
+  }
+
+  ExprType type() const override { return ExprType::VECTOR_DISTANCE; }
+  AttrType value_type() const override { return AttrType::FLOATS; }
+
+  RC get_value(const Tuple &tuple, Value &value) const override;
+
+  unique_ptr<Expression> &left() { return left_; }
+  unique_ptr<Expression> &right() { return right_; }
+  const string           &method() const { return method_; }
+
+private:
+  unique_ptr<Expression> left_;
+  unique_ptr<Expression> right_;
+  string                 method_;
 };

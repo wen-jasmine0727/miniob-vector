@@ -63,6 +63,14 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
       rc = callback(aggregate_expr.child());
     } break;
 
+    case ExprType::VECTOR_DISTANCE: {
+      auto &vd_expr = static_cast<VectorDistanceExpr &>(expr);
+      rc = callback(vd_expr.left());
+      if (OB_SUCC(rc)) {
+        rc = callback(vd_expr.right());
+      }
+    } break;
+
     case ExprType::NONE:
     case ExprType::STAR:
     case ExprType::UNBOUND_FIELD:

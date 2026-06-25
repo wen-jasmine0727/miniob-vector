@@ -11,6 +11,7 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "common/type/vector_util.h"
 
 using namespace std;
 
@@ -89,6 +90,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         STRING_T
         FLOAT_T
         VECTOR_T
+        STRING_TO_VECTOR_T
+        VECTOR_TO_STRING_T
+        DISTANCE_T
+        VECTOR_DISTANCE_T
         HELP
         EXIT
         DOT //QUOTE
@@ -358,19 +363,27 @@ attr_def_list:
     ;
     
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      $$->length = $4;
+      if ($$->type == AttrType::VECTORS) {
+        $$->length = $4 * sizeof(float);
+      } else {
+        $$->length = $4;
+      }
     }
     | ID type
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      $$->length = 4;
+      if ($$->type == AttrType::VECTORS) {
+        $$->length = VECTOR_DEFAULT_DIM * sizeof(float);
+      } else {
+        $$->length = 4;
+      }
     }
     ;
 number:
@@ -444,6 +457,41 @@ value:
     |SSS {
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
+      free(tmp);
+    }
+    |STRING_TO_VECTOR_T LBRACE SSS RBRACE {
+      char *tmp = common::substr($3,1,strlen($3)-2);
+      $$ = new Value();
+      $$->set_type(AttrType::VECTORS);
+      $$->set_vector_from_str(string(tmp));
+      free(tmp);
+    }
+    |DISTANCE_T LBRACE value COMMA value COMMA SSS RBRACE {
+      char *tmp = common::substr($7,1,strlen($7)-2);
+      $$ = new Value();
+      Value result_val;
+      RC rc = vector_distance(*$3, *$5, string(tmp), result_val);
+      if (rc == RC::SUCCESS) {
+        $$->set_float(result_val.get_float());
+      } else {
+        $$->set_float(0.0);
+      }
+      delete $3;
+      delete $5;
+      free(tmp);
+    }
+    |VECTOR_DISTANCE_T LBRACE value COMMA value COMMA SSS RBRACE {
+      char *tmp = common::substr($7,1,strlen($7)-2);
+      $$ = new Value();
+      Value result_val;
+      RC rc = vector_distance(*$3, *$5, string(tmp), result_val);
+      if (rc == RC::SUCCESS) {
+        $$->set_float(result_val.get_float());
+      } else {
+        $$->set_float(0.0);
+      }
+      delete $3;
+      delete $5;
       free(tmp);
     }
     ;
@@ -568,6 +616,22 @@ expression:
     }
     | aggregate_expression {
       $$ = $1;
+    }
+    | VECTOR_TO_STRING_T LBRACE expression RBRACE {
+      $$ = new CastExpr(std::unique_ptr<Expression>($3), AttrType::CHARS);
+      $$->set_name(token_name(sql_string, &@$));
+    }
+    | DISTANCE_T LBRACE expression COMMA expression COMMA SSS RBRACE {
+      char *tmp = common::substr($7,1,strlen($7)-2);
+      $$ = new VectorDistanceExpr(std::unique_ptr<Expression>($3), std::unique_ptr<Expression>($5), string(tmp));
+      $$->set_name(token_name(sql_string, &@$));
+      free(tmp);
+    }
+    | VECTOR_DISTANCE_T LBRACE expression COMMA expression COMMA SSS RBRACE {
+      char *tmp = common::substr($7,1,strlen($7)-2);
+      $$ = new VectorDistanceExpr(std::unique_ptr<Expression>($3), std::unique_ptr<Expression>($5), string(tmp));
+      $$->set_name(token_name(sql_string, &@$));
+      free(tmp);
     }
     ;
 

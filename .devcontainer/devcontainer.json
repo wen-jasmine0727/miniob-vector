@@ -1,3 +1,33 @@
 {
-  "image": "oceanbase/miniob"
+    "name": "MiniOB Course",
+    "image": "miniob-course:latest",
+    "workspaceFolder": "/workspace/miniob",
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/workspace/miniob,type=bind"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-extension-pack",
+                "twxs.cmake",
+                "ms-vscode.cmake-tools",
+                "eamodio.gitlens"
+            ],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "C_Cpp.default.includePath": [
+                    "${workspaceFolder}/src/**",
+                    "/usr/include/**"
+                ]
+            }
+        }
+    },
+    "postCreateCommand": "echo 'Container ready for MiniOB development!'",
+    "remoteUser": "root",
+    "runArgs": [
+        "--privileged",
+        "-p",
+        "6789:6789"
+    ]
 }

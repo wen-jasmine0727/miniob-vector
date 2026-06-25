@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
+#include "common/type/vector_util.h"
 
 using namespace std;
 
@@ -142,6 +143,15 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
+
+  // VECTORS can only be compared for equality/inequality
+  if (left.attr_type() == AttrType::VECTORS || right.attr_type() == AttrType::VECTORS) {
+    if (comp_ != EQUAL_TO && comp_ != NOT_EQUAL) {
+      LOG_WARN("VECTOR type only supports EQUAL_TO and NOT_EQUAL comparisons");
+      return RC::UNSUPPORTED;
+    }
+  }
+
   int cmp_result = left.compare(right);
   result         = false;
   switch (comp_) {
@@ -627,4 +637,21 @@ RC AggregateExpr::type_from_string(const char *type_str, AggregateExpr::Type &ty
     rc = RC::INVALID_ARGUMENT;
   }
   return rc;
+}
+
+RC VectorDistanceExpr::get_value(const Tuple &tuple, Value &value) const
+{
+  Value left_val;
+  Value right_val;
+
+  RC rc = left_->get_value(tuple, left_val);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  rc = right_->get_value(tuple, right_val);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+
+  return vector_distance(left_val, right_val, method_, value);
 }

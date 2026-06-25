@@ -76,4 +76,35 @@ public:
 private:
 };
 
+/**
+ * @class LeveledCompactionPicker
+ * @brief A class implementing the leveled compaction strategy.
+ *
+ * In leveled compaction, each level (except L0) contains a single sorted run
+ * (SSTables with non-overlapping key ranges). L0 is limited by file count.
+ * When a level exceeds its size/ file count threshold, a compaction is triggered
+ * that merges SSTables from that level with overlapping SSTables from the next level.
+ */
+class LeveledCompactionPicker : public ObCompactionPicker
+{
+public:
+  LeveledCompactionPicker(ObLsmOptions *options) : ObCompactionPicker(options) {}
+
+  ~LeveledCompactionPicker() = default;
+
+  unique_ptr<ObCompaction> pick(SSTablesPtr sstables) override;
+
+private:
+  /**
+   * @brief Calculate the score of a level for compaction priority.
+   * A score > 1 means the level needs compaction.
+   */
+  double calc_level_score(SSTablesPtr sstables, int level);
+
+  /**
+   * @brief Check if two SSTables have overlapping key ranges.
+   */
+  bool key_range_overlap(const shared_ptr<ObSSTable> &a, const shared_ptr<ObSSTable> &b);
+};
+
 }  // namespace oceanbase
