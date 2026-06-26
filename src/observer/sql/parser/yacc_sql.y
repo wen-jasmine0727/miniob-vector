@@ -122,6 +122,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
+        AS
+        ORDER
+        ASC
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -139,6 +142,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
   vector<string> *                           key_list;
+  vector<OrderBySqlNode> *                   order_by_list;
   char *                                     cstring;
   int                                        number;
   float                                      floats;
@@ -155,6 +159,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
+%destructor { delete $$; } <order_by_list>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -209,6 +214,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            command_wrapper
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
+%type <order_by_list>       order_by
+%type <order_by_list>       sort_list
+%type <number>              sort_dir
+%type <cstring>             opt_alias
 
 %left '+' '-'
 %left '*' '/'
@@ -531,7 +540,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -553,6 +562,11 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.group_by.swap(*$6);
         delete $6;
       }
+
+      if ($7 != nullptr) {
+        $$->selection.order_by.swap(*$7);
+        delete $7;
+      }
     }
     ;
 calc_stmt:
@@ -565,20 +579,31 @@ calc_stmt:
     ;
 
 expression_list:
-    expression
+    expression opt_alias
     {
       $$ = new vector<unique_ptr<Expression>>;
+      if ($2 != nullptr) {
+        $1->set_alias($2);
+      }
       $$->emplace_back($1);
     }
-    | expression COMMA expression_list
+    | expression opt_alias COMMA expression_list
     {
-      if ($3 != nullptr) {
-        $$ = $3;
+      if ($1 != nullptr && $2 != nullptr) {
+        $1->set_alias($2);
+      }
+      if ($4 != nullptr) {
+        $$ = $4;
       } else {
         $$ = new vector<unique_ptr<Expression>>;
       }
       $$->emplace($$->begin(), $1);
     }
+    ;
+
+opt_alias:
+    /* empty */ { $$ = nullptr; }
+    | AS ID { $$ = $2; }
     ;
 expression:
     expression '+' expression {
@@ -771,6 +796,46 @@ group_by:
       // 但是这里没有处理。
       $$ = $3;
     }
+    ;
+
+order_by:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY sort_list
+    {
+      $$ = $3;
+    }
+    ;
+
+sort_list:
+    expression sort_dir
+    {
+      $$ = new vector<OrderBySqlNode>;
+      OrderBySqlNode node;
+      node.expression = unique_ptr<Expression>($1);
+      node.is_asc = ($2 != 0);
+      $$->emplace_back(std::move(node));
+    }
+    | expression sort_dir COMMA sort_list
+    {
+      if ($4 != nullptr) {
+        $$ = $4;
+      } else {
+        $$ = new vector<OrderBySqlNode>;
+      }
+      OrderBySqlNode node;
+      node.expression = unique_ptr<Expression>($1);
+      node.is_asc = ($2 != 0);
+      $$->emplace($$->begin(), std::move(node));
+    }
+    ;
+
+sort_dir:
+    /* empty */ { $$ = 1; }
+    | ASC { $$ = 1; }
+    | DESC { $$ = 0; }
     ;
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by

@@ -44,10 +44,11 @@ Value::Value(const Value &other)
     } break;
 
     case AttrType::VECTORS: {
-      if (own_data_ && other.value_.pointer_value_ != nullptr && length_ > 0) {
+      if (other.value_.pointer_value_ != nullptr && length_ > 0) {
         int byte_len = length_ * sizeof(float);
         this->value_.pointer_value_ = new char[byte_len];
         memcpy(this->value_.pointer_value_, other.value_.pointer_value_, byte_len);
+        this->own_data_ = true;
       }
     } break;
 
@@ -82,10 +83,11 @@ Value &Value::operator=(const Value &other)
     } break;
 
     case AttrType::VECTORS: {
-      if (own_data_ && other.value_.pointer_value_ != nullptr && length_ > 0) {
+      if (other.value_.pointer_value_ != nullptr && length_ > 0) {
         int byte_len = length_ * sizeof(float);
         this->value_.pointer_value_ = new char[byte_len];
         memcpy(this->value_.pointer_value_, other.value_.pointer_value_, byte_len);
+        this->own_data_ = true;
       }
     } break;
 

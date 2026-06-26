@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/order_by_logical_operator.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -136,6 +137,26 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     }
 
     last_oper = &group_by_oper;
+  }
+
+  // order by
+  unique_ptr<LogicalOperator> order_by_oper;
+  vector<OrderByUnit> &order_by_units = select_stmt->order_by();
+  if (!order_by_units.empty()) {
+    // 先拷贝 order_by_units（因为 select_stmt 还活着，不能 move 走）
+    vector<OrderByUnit> order_by_units_copy;
+    for (auto &unit : order_by_units) {
+      OrderByUnit copy;
+      copy.expression = unit.expression->copy();
+      copy.is_asc = unit.is_asc;
+      order_by_units_copy.emplace_back(std::move(copy));
+    }
+
+    order_by_oper = make_unique<OrderByLogicalOperator>(std::move(order_by_units_copy));
+    if (*last_oper) {
+      order_by_oper->add_child(std::move(*last_oper));
+    }
+    last_oper = &order_by_oper;
   }
 
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));
