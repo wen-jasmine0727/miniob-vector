@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include <cmath>
+#include <cctype>
 #include <string>
 #include "common/value.h"
 
@@ -89,11 +90,15 @@ inline RC vector_distance(const float *a, const float *b, int dim, const std::st
     return RC::INVALID_ARGUMENT;
   }
 
-  if (method == "EUCLIDEAN" || method == "L2") {
+  // 转大写实现大小写不敏感
+  string upper_method = method;
+  for (char &c : upper_method) c = toupper(c);
+
+  if (upper_method == "EUCLIDEAN" || upper_method == "L2" || upper_method == "L2_DISTANCE") {
     result = vector_l2_distance(a, b, dim);
-  } else if (method == "COSINE") {
+  } else if (upper_method == "COSINE" || upper_method == "COSINE_DISTANCE") {
     result = vector_cosine_distance(a, b, dim);
-  } else if (method == "DOT" || method == "INNER_PRODUCT") {
+  } else if (upper_method == "DOT" || upper_method == "INNER_PRODUCT" || upper_method == "INNER_PRODUCT_DISTANCE") {
     result = vector_inner_product(a, b, dim);
   } else {
     return RC::INVALID_ARGUMENT;

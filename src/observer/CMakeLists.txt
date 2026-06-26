@@ -1,15 +1,17 @@
 MESSAGE(STATUS "This is CMAKE_CURRENT_SOURCE_DIR dir " ${CMAKE_CURRENT_SOURCE_DIR})
 
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
 
 set(PARSER_WORKDIR ${CMAKE_CURRENT_SOURCE_DIR}/sql/parser)
-set(LEXER_SOURCES ${PARSER_WORKDIR}/lex_sql.cpp)
-set(LEXER_HEADERS ${PARSER_WORKDIR}/lex_sql.h)
-set(PARSER_SOURCES ${PARSER_WORKDIR}/yacc_sql.cpp)
-set(PARSER_HEADERS ${PARSER_WORKDIR}/yacc_sql.hpp)
+set(PARSER_OUTDIR ${CMAKE_CURRENT_BINARY_DIR}/sql/parser)
+set(LEXER_SOURCES ${PARSER_OUTDIR}/lex_sql.cpp)
+set(LEXER_HEADERS ${PARSER_OUTDIR}/lex_sql.h)
+set(PARSER_SOURCES ${PARSER_OUTDIR}/yacc_sql.cpp)
+set(PARSER_HEADERS ${PARSER_OUTDIR}/yacc_sql.hpp)
 
 flex_target(lex ${PARSER_WORKDIR}/lex_sql.l "${LEXER_SOURCES}" DEFINES_FILE "${LEXER_HEADERS}")
 bison_target(yacc ${PARSER_WORKDIR}/yacc_sql.y "${PARSER_SOURCES}" DEFINES_FILE "${PARSER_HEADERS}")
@@ -22,8 +24,13 @@ SET(LIB_SRC ${LIB_SRC} ${LEXER_SOURCES} ${PARSER_SOURCES})
 FOREACH (F ${ALL_SRC})
 
     IF (NOT ${F} STREQUAL ${MAIN_SRC})
-        SET(LIB_SRC ${LIB_SRC} ${F})
-        MESSAGE("Use " ${F})
+        # 排除源码树中由 flex/bison 生成的旧文件
+        IF (${F} MATCHES "sql/parser/lex_sql\.cpp" OR ${F} MATCHES "sql/parser/yacc_sql\.cpp")
+            MESSAGE("Skip " ${F})
+        ELSE()
+            SET(LIB_SRC ${LIB_SRC} ${F})
+            MESSAGE("Use " ${F})
+        ENDIF()
     ENDIF()
 
 ENDFOREACH (F)

@@ -294,8 +294,9 @@ RC PlainCommunicator::write_tuple_result(SqlResult *sql_result)
       rc = tuple->cell_at(i, value);
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to get tuple cell value. rc=%s", strrc(rc));
-        sql_result->close();
-        return rc;
+        const char *fail_msg = "FAILURE";
+        rc = writer_->writen(fail_msg, strlen(fail_msg));
+        continue;
       }
 
       string cell_str = value.to_string();

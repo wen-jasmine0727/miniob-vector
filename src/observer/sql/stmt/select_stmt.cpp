@@ -82,6 +82,53 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
+  // 构建 SELECT 别名映射表（alias -> expression*）
+  unordered_map<string, Expression *> alias_map;
+  for (unique_ptr<Expression> &expr : bound_expressions) {
+    const char *alias = expr->alias();
+    if (!common::is_blank(alias) && expr->type() != ExprType::STAR) {
+      alias_map[alias] = expr.get();
+    }
+  }
+
+  // bind order by expressions
+  vector<OrderByUnit> order_by_units;
+  for (auto &order_by_node : select_sql.order_by) {
+    unique_ptr<Expression> bound_expr;
+
+    // 检查 ORDER BY 是否引用了 SELECT 别名
+    if (order_by_node.expression->type() == ExprType::UNBOUND_FIELD) {
+      auto unbound = static_cast<UnboundFieldExpr *>(order_by_node.expression.get());
+      if (common::is_blank(unbound->table_name())) {
+        auto it = alias_map.find(unbound->field_name());
+        if (it != alias_map.end()) {
+          // 使用 SELECT 中对应的表达式作为排序键
+          bound_expr = it->second->copy();
+        }
+      }
+    }
+
+    if (!bound_expr) {
+      // 正常绑定
+      vector<unique_ptr<Expression>> bound_exprs;
+      RC rc = expression_binder.bind_expression(order_by_node.expression, bound_exprs);
+      if (OB_FAIL(rc)) {
+        LOG_INFO("bind order by expression failed. rc=%s", strrc(rc));
+        return rc;
+      }
+      if (bound_exprs.size() != 1) {
+        LOG_WARN("order by expression should produce exactly one expression");
+        return RC::INVALID_ARGUMENT;
+      }
+      bound_expr = std::move(bound_exprs[0]);
+    }
+
+    OrderByUnit unit;
+    unit.expression = std::move(bound_expr);
+    unit.is_asc = order_by_node.is_asc;
+    order_by_units.emplace_back(std::move(unit));
+  }
+
   Table *default_table = nullptr;
   if (tables.size() == 1) {
     default_table = tables[0];
@@ -107,6 +154,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->order_by_.swap(order_by_units);
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }
