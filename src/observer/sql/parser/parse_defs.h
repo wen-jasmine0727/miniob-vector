@@ -103,6 +103,7 @@ struct SelectSqlNode
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
   vector<OrderBySqlNode>         order_by;     ///< order by clause
+  int                            limit = -1;   ///< -1 means no limit
 };
 
 /**
@@ -203,6 +204,12 @@ struct CreateIndexSqlNode
   string index_name;      ///< Index name
   string relation_name;   ///< Relation name
   string attribute_name;  ///< Attribute name
+
+  bool   is_vector_index = false;  ///< true if CREATE VECTOR INDEX
+  string index_type;               ///< IVFFLAT
+  string distance_type;            ///< L2_DISTANCE, COSINE_DISTANCE, INNER_PRODUCT
+  int    lists          = 0;       ///< IVFFLAT lists parameter
+  int    probes         = 0;       ///< IVFFLAT probes parameter
 };
 
 /**

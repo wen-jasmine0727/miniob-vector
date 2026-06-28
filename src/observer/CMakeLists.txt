@@ -13,6 +13,8 @@ set(LEXER_HEADERS ${PARSER_OUTDIR}/lex_sql.h)
 set(PARSER_SOURCES ${PARSER_OUTDIR}/yacc_sql.cpp)
 set(PARSER_HEADERS ${PARSER_OUTDIR}/yacc_sql.hpp)
 
+file(MAKE_DIRECTORY ${PARSER_OUTDIR})
+
 flex_target(lex ${PARSER_WORKDIR}/lex_sql.l "${LEXER_SOURCES}" DEFINES_FILE "${LEXER_HEADERS}")
 bison_target(yacc ${PARSER_WORKDIR}/yacc_sql.y "${PARSER_SOURCES}" DEFINES_FILE "${PARSER_HEADERS}")
 add_flex_bison_dependency(lex yacc)

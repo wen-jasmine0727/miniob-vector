@@ -44,7 +44,9 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/order_by_physical_operator.h"
 #include "sql/operator/order_by_logical_operator.h"
 #include "sql/operator/table_scan_vec_physical_operator.h"
+#include "sql/operator/vector_index_scan_physical_operator.h"
 #include "sql/optimizer/physical_plan_generator.h"
+#include "storage/index/ivfflat_index.h"
 
 using namespace std;
 
@@ -355,6 +357,52 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
   ASSERT(logical_oper.children().size() == 1, "order by operator should have 1 child");
 
   LogicalOperator &child_oper = *logical_oper.children().front();
+
+  if (logical_oper.limit() > 0 && logical_oper.order_by_units().size() == 1 &&
+      logical_oper.order_by_units()[0].is_asc && child_oper.type() == LogicalOperatorType::TABLE_GET) {
+    auto &order_expr = logical_oper.order_by_units()[0].expression;
+    if (order_expr->type() == ExprType::VECTOR_DISTANCE) {
+      auto *vd_expr = static_cast<VectorDistanceExpr *>(order_expr.get());
+      Expression *left = vd_expr->left().get();
+      Expression *right = vd_expr->right().get();
+
+      FieldExpr *field_expr = nullptr;
+      Expression *query_expr = nullptr;
+      if (left->type() == ExprType::FIELD) {
+        field_expr = static_cast<FieldExpr *>(left);
+        query_expr = right;
+      } else if (right->type() == ExprType::FIELD) {
+        field_expr = static_cast<FieldExpr *>(right);
+        query_expr = left;
+      }
+
+      Value query_value;
+      if (field_expr != nullptr && query_expr != nullptr && query_expr->try_get_value(query_value) == RC::SUCCESS) {
+        if (query_value.attr_type() == AttrType::CHARS) {
+          Value parsed;
+          parsed.set_vector_from_str(query_value.get_string());
+          query_value = std::move(parsed);
+        }
+
+        auto &table_get_oper = static_cast<TableGetLogicalOperator &>(child_oper);
+        Table *table = table_get_oper.table();
+        Index *index = table->find_index_by_field(field_expr->field_name());
+        if (index != nullptr && index->is_vector_index() && query_value.attr_type() == AttrType::VECTORS) {
+          const FieldMeta *field_meta = table->table_meta().field(field_expr->field_name());
+          int dim = field_meta == nullptr ? 0 : field_meta->len() / static_cast<int>(sizeof(float));
+          if (query_value.vector_dim() == dim) {
+            const float *data = query_value.get_vector_data();
+            vector<float> query_vector(data, data + query_value.vector_dim());
+            oper = make_unique<VectorIndexScanPhysicalOperator>(
+                table, static_cast<IvfflatIndex *>(index), std::move(query_vector), logical_oper.limit());
+            LOG_TRACE("use vector index scan");
+            return RC::SUCCESS;
+          }
+        }
+      }
+    }
+  }
+
   unique_ptr<PhysicalOperator> child_physical_oper;
   rc = create(child_oper, child_physical_oper, session);
   if (OB_FAIL(rc)) {
@@ -371,7 +419,7 @@ RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &logical_oper, uniq
     order_by_units_copy.emplace_back(std::move(copy));
   }
 
-  auto order_by_oper = make_unique<OrderByPhysicalOperator>(std::move(order_by_units_copy));
+  auto order_by_oper = make_unique<OrderByPhysicalOperator>(std::move(order_by_units_copy), logical_oper.limit());
   order_by_oper->add_child(std::move(child_physical_oper));
 
   oper = std::move(order_by_oper);

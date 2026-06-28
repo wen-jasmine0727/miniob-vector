@@ -36,10 +36,17 @@ public:
   IndexMeta() = default;
 
   RC init(const char *name, const FieldMeta &field);
+  RC init_vector(const char *name, const FieldMeta &field, const char *index_type, const char *distance_type,
+      int lists, int probes);
 
 public:
   const char *name() const;
   const char *field() const;
+  bool        is_vector_index() const { return is_vector_index_; }
+  const char *index_type() const { return index_type_.c_str(); }
+  const char *distance_type() const { return distance_type_.c_str(); }
+  int         lists() const { return lists_; }
+  int         probes() const { return probes_; }
 
   void desc(ostream &os) const;
 
@@ -50,4 +57,9 @@ public:
 protected:
   string name_;   // index's name
   string field_;  // field's name
+  bool   is_vector_index_ = false;
+  string index_type_;
+  string distance_type_;
+  int    lists_  = 0;
+  int    probes_ = 0;
 };

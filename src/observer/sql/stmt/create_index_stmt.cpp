@@ -53,6 +53,16 @@ RC CreateIndexStmt::create(Db *db, const CreateIndexSqlNode &create_index, Stmt 
     return RC::SCHEMA_INDEX_NAME_REPEAT;
   }
 
-  stmt = new CreateIndexStmt(table, field_meta, create_index.index_name);
+  if (create_index.is_vector_index) {
+    if (field_meta->type() != AttrType::VECTORS) {
+      LOG_WARN("vector index can only be created on vector field. table=%s, field=%s",
+          table_name, create_index.attribute_name.c_str());
+      return RC::INVALID_ARGUMENT;
+    }
+    stmt = new CreateIndexStmt(table, field_meta, create_index.index_name, true,
+        create_index.index_type, create_index.distance_type, create_index.lists, create_index.probes);
+  } else {
+    stmt = new CreateIndexStmt(table, field_meta, create_index.index_name);
+  }
   return RC::SUCCESS;
 }

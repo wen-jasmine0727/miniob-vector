@@ -14,8 +14,8 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
-OrderByPhysicalOperator::OrderByPhysicalOperator(vector<OrderByUnit> &&order_by_units)
-    : order_by_units_(std::move(order_by_units))
+OrderByPhysicalOperator::OrderByPhysicalOperator(vector<OrderByUnit> &&order_by_units, int limit)
+    : order_by_units_(std::move(order_by_units)), limit_(limit)
 {}
 
 int OrderByPhysicalOperator::compare_rows(const Tuple &a, const Tuple &b) const
@@ -74,6 +74,9 @@ RC OrderByPhysicalOperator::open(Trx *trx)
        [this](const unique_ptr<ValueListTuple> &a, const unique_ptr<ValueListTuple> &b) {
          return compare_rows(*a, *b) < 0;
        });
+  if (limit_ >= 0 && static_cast<int>(sorted_tuples_.size()) > limit_) {
+    sorted_tuples_.resize(limit_);
+  }
 
   if (!sorted_tuples_.empty()) {
     int cell_num = sorted_tuples_[0]->cell_num();

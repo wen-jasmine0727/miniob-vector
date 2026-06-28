@@ -653,5 +653,16 @@ RC VectorDistanceExpr::get_value(const Tuple &tuple, Value &value) const
     return rc;
   }
 
+  if (left_val.attr_type() == AttrType::CHARS) {
+    Value vector_value;
+    vector_value.set_vector_from_str(left_val.get_string());
+    left_val = std::move(vector_value);
+  }
+  if (right_val.attr_type() == AttrType::CHARS) {
+    Value vector_value;
+    vector_value.set_vector_from_str(right_val.get_string());
+    right_val = std::move(vector_value);
+  }
+
   return vector_distance(left_val, right_val, method_, value);
 }

@@ -19,7 +19,7 @@ See the Mulan PSL v2 for more details. */
 class OrderByPhysicalOperator : public PhysicalOperator
 {
 public:
-  OrderByPhysicalOperator(vector<OrderByUnit> &&order_by_units);
+  OrderByPhysicalOperator(vector<OrderByUnit> &&order_by_units, int limit = -1);
   virtual ~OrderByPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::ORDER_BY; }
@@ -38,4 +38,5 @@ private:
   vector<unique_ptr<ValueListTuple>>  sorted_tuples_;
   int                                 current_index_ = -1;
   TupleSchema                         tuple_schema_;
+  int                                 limit_ = -1;
 };

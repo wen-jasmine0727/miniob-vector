@@ -54,6 +54,8 @@ public:
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
   vector<OrderByUnit>            &order_by() { return order_by_; }
+  int                             limit() const { return limit_; }
+  void                            set_limit(int limit) { limit_ = limit; }
 
 private:
   vector<unique_ptr<Expression>> query_expressions_;
@@ -61,4 +63,5 @@ private:
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<unique_ptr<Expression>> group_by_;
   vector<OrderByUnit>            order_by_;
+  int                            limit_ = -1;
 };

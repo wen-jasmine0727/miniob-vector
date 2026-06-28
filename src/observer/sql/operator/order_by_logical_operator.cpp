@@ -12,6 +12,6 @@ See the Mulan PSL v2 for more details. */
 
 using namespace std;
 
-OrderByLogicalOperator::OrderByLogicalOperator(vector<OrderByUnit> &&order_by_units)
-    : order_by_units_(std::move(order_by_units))
+OrderByLogicalOperator::OrderByLogicalOperator(vector<OrderByUnit> &&order_by_units, int limit)
+    : order_by_units_(std::move(order_by_units)), limit_(limit)
 {}

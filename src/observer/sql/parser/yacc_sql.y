@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "common/log/log.h"
 #include "common/lang/string.h"
@@ -49,6 +50,13 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   UnboundAggregateExpr *expr = new UnboundAggregateExpr(aggregate_name, child);
   expr->set_name(token_name(sql_string, llocp));
   return expr;
+}
+
+static bool is_vector_distance_func(const char *name)
+{
+  return 0 == strcasecmp(name, "l2_distance") ||
+         0 == strcasecmp(name, "cosine_distance") ||
+         0 == strcasecmp(name, "inner_product");
 }
 
 %}
@@ -125,6 +133,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         AS
         ORDER
         ASC
+        WITH
+        TYPE
+        LISTS
+        PROBES
+        LIMIT
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -173,6 +186,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value>               value
 %type <number>              number
 %type <cstring>             relation
+%type <cstring>             identifier
 %type <comp>                comp_op
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
@@ -217,6 +231,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <order_by_list>       order_by
 %type <order_by_list>       sort_list
 %type <number>              sort_dir
+%type <number>              opt_limit
 %type <cstring>             opt_alias
 
 %left '+' '-'
@@ -317,13 +332,65 @@ desc_table_stmt:
     ;
 
 create_index_stmt:    /*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE ID RBRACE
+    CREATE INDEX ID ON ID LBRACE identifier RBRACE
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_name = $3;
       create_index.relation_name = $5;
       create_index.attribute_name = $7;
+    }
+    | CREATE VECTOR_T INDEX ID ON ID LBRACE identifier RBRACE WITH LBRACE TYPE EQ ID COMMA DISTANCE_T EQ ID COMMA LISTS EQ NUMBER COMMA PROBES EQ NUMBER RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.is_vector_index = true;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
+      create_index.index_type = $14;
+      create_index.distance_type = $18;
+      create_index.lists = $22;
+      create_index.probes = $26;
+    }
+    | CREATE VECTOR_T INDEX ID ON ID LBRACE identifier RBRACE WITH LBRACE DISTANCE_T EQ ID COMMA TYPE EQ ID COMMA LISTS EQ NUMBER COMMA PROBES EQ NUMBER RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.is_vector_index = true;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
+      create_index.distance_type = $14;
+      create_index.index_type = $18;
+      create_index.lists = $22;
+      create_index.probes = $26;
+    }
+    | CREATE VECTOR_T INDEX ID ON ID LBRACE identifier RBRACE WITH LBRACE LISTS EQ NUMBER COMMA PROBES EQ NUMBER RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.is_vector_index = true;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
+      create_index.index_type = "IVFFLAT";
+      create_index.distance_type = "L2_DISTANCE";
+      create_index.lists = $14;
+      create_index.probes = $18;
+    }
+    | CREATE VECTOR_T INDEX ID ON ID LBRACE identifier RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
+      CreateIndexSqlNode &create_index = $$->create_index;
+      create_index.is_vector_index = true;
+      create_index.index_name = $4;
+      create_index.relation_name = $6;
+      create_index.attribute_name = $8;
+      create_index.index_type = "IVFFLAT";
+      create_index.distance_type = "L2_DISTANCE";
+      create_index.lists = 1;
+      create_index.probes = 1;
     }
     ;
 
@@ -372,7 +439,7 @@ attr_def_list:
     ;
     
 attr_def:
-    ID type LBRACE number RBRACE
+    identifier type LBRACE number RBRACE
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
@@ -383,7 +450,7 @@ attr_def:
         $$->length = $4;
       }
     }
-    | ID type
+    | identifier type
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
@@ -540,7 +607,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by order_by
+    SELECT expression_list FROM rel_list where group_by order_by opt_limit
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -567,6 +634,7 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.order_by.swap(*$7);
         delete $7;
       }
+      $$->selection.limit = $8;
     }
     ;
 calc_stmt:
@@ -658,6 +726,15 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       free(tmp);
     }
+    | ID LBRACE expression COMMA expression RBRACE {
+      if (is_vector_distance_func($1)) {
+        $$ = new VectorDistanceExpr(std::unique_ptr<Expression>($3), std::unique_ptr<Expression>($5), string($1));
+        $$->set_name(token_name(sql_string, &@$));
+      } else {
+        LOG_WARN("unsupported two-argument function: %s", $1);
+        $$ = new ValueExpr(Value(0));
+      }
+    }
     ;
 
 aggregate_expression:
@@ -666,15 +743,29 @@ aggregate_expression:
     }
     ;
 
+identifier:
+    ID { $$ = $1; }
+    | VECTOR_T { $$ = const_cast<char *>("vector"); }
+    ;
+
 rel_attr:
     ID {
       $$ = new RelAttrSqlNode;
       $$->attribute_name = $1;
     }
+    | VECTOR_T {
+      $$ = new RelAttrSqlNode;
+      $$->attribute_name = "vector";
+    }
     | ID DOT ID {
       $$ = new RelAttrSqlNode;
       $$->relation_name  = $1;
       $$->attribute_name = $3;
+    }
+    | ID DOT VECTOR_T {
+      $$ = new RelAttrSqlNode;
+      $$->relation_name  = $1;
+      $$->attribute_name = "vector";
     }
     ;
 
@@ -836,6 +927,10 @@ sort_dir:
     /* empty */ { $$ = 1; }
     | ASC { $$ = 1; }
     | DESC { $$ = 0; }
+    ;
+opt_limit:
+    /* empty */ { $$ = -1; }
+    | LIMIT NUMBER { $$ = $2; }
     ;
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by

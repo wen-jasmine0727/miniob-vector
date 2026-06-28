@@ -10,6 +10,15 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+
+#include "common/lang/fstream.h"
+#include "common/lang/string.h"
+#include "common/lang/utility.h"
+#include "common/log/log.h"
+#include "common/type/vector_util.h"
 #include "storage/index/index.h"
 
 /**
@@ -22,28 +31,49 @@ public:
   IvfflatIndex(){};
   virtual ~IvfflatIndex() noexcept {};
 
-  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
-  {
-    return RC::UNIMPLEMENTED;
-  };
-  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
-  {
+  RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
+  RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta) override;
 
-    return RC::UNIMPLEMENTED;
-  };
+  bool is_vector_index() override { return true; }
 
-  vector<RID> ann_search(const vector<float> &base_vector, size_t limit) { return vector<RID>(); }
+  vector<RID> ann_search(const vector<float> &base_vector, size_t limit);
+  void rebuild() { rebuild_centroids(); }
 
-  RC close() { return RC::UNIMPLEMENTED; }
+  RC close() { return sync(); }
 
-  RC insert_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
-  RC delete_entry(const char *record, const RID *rid) override { return RC::UNIMPLEMENTED; };
+  RC insert_entry(const char *record, const RID *rid) override;
+  RC delete_entry(const char *record, const RID *rid) override;
 
-  RC sync() override { return RC::UNIMPLEMENTED; };
+  IndexScanner *create_scanner(const char *, int, bool, const char *, int, bool) override { return nullptr; }
+
+  RC sync() override;
 
 private:
-  bool   inited_ = false;
-  Table *table_  = nullptr;
-  int    lists_  = 1;
-  int    probes_ = 1;
+  struct Entry
+  {
+    RID           rid;
+    vector<float> embedding;
+  };
+
+  float distance(const vector<float> &a, const vector<float> &b) const
+  {
+    float result = std::numeric_limits<float>::max();
+    vector_distance(a.data(), b.data(), static_cast<int>(a.size()), distance_type_, result);
+    return result;
+  }
+
+  int nearest_centroid(const vector<float> &v) const;
+  void rebuild_centroids();
+  RC   load();
+
+private:
+  bool                  inited_ = false;
+  Table                *table_  = nullptr;
+  string                file_name_;
+  string                distance_type_ = "L2_DISTANCE";
+  int                   lists_  = 1;
+  int                   probes_ = 1;
+  int                   dim_    = 0;
+  vector<vector<float>> centroids_;
+  vector<vector<Entry>> buckets_;
 };

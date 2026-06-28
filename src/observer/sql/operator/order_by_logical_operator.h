@@ -19,14 +19,16 @@ See the Mulan PSL v2 for more details. */
 class OrderByLogicalOperator : public LogicalOperator
 {
 public:
-  OrderByLogicalOperator(vector<OrderByUnit> &&order_by_units);
+  OrderByLogicalOperator(vector<OrderByUnit> &&order_by_units, int limit = -1);
   virtual ~OrderByLogicalOperator() = default;
 
   LogicalOperatorType type() const override { return LogicalOperatorType::ORDER_BY; }
   OpType              get_op_type() const override { return OpType::ORDERBY; }
 
   vector<OrderByUnit> &order_by_units() { return order_by_units_; }
+  int                  limit() const { return limit_; }
 
 private:
   vector<OrderByUnit> order_by_units_;
+  int                 limit_ = -1;
 };

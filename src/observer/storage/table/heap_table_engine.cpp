@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/heap_record_scanner.h"
 #include "common/log/log.h"
 #include "storage/index/bplus_tree_index.h"
+#include "storage/index/ivfflat_index.h"
 #include "storage/common/meta_util.h"
 #include "storage/db/db.h"
 
@@ -122,7 +123,8 @@ RC HeapTableEngine::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadW
   return rc;
 }
 
-RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
+RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name, bool is_vector_index,
+    const char *index_type, const char *distance_type, int lists, int probes)
 {
   if (common::is_blank(index_name) || nullptr == field_meta) {
     LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", table_meta_->name());
@@ -131,7 +133,9 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
 
   IndexMeta new_index_meta;
 
-  RC rc = new_index_meta.init(index_name, *field_meta);
+  RC rc = is_vector_index ?
+      new_index_meta.init_vector(index_name, *field_meta, index_type, distance_type, lists, probes) :
+      new_index_meta.init(index_name, *field_meta);
   if (rc != RC::SUCCESS) {
     LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
              table_meta_->name(), index_name, field_meta->name());
@@ -139,13 +143,13 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   }
 
   // 创建索引相关数据
-  BplusTreeIndex *index      = new BplusTreeIndex();
-  string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
+  Index *index = is_vector_index ? static_cast<Index *>(new IvfflatIndex()) : static_cast<Index *>(new BplusTreeIndex());
+  string index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_name);
 
   rc = index->create(table_, index_file.c_str(), new_index_meta, *field_meta);
   if (rc != RC::SUCCESS) {
     delete index;
-    LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
+    LOG_ERROR("Failed to create index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
     return rc;
   }
 
@@ -176,6 +180,15 @@ RC HeapTableEngine::create_index(Trx *trx, const FieldMeta *field_meta, const ch
   }
   scanner->close_scan();
   delete scanner;
+  if (is_vector_index) {
+    static_cast<IvfflatIndex *>(index)->rebuild();
+    rc = index->sync();
+    if (rc != RC::SUCCESS) {
+      delete index;
+      LOG_ERROR("Failed to sync vector index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
+      return rc;
+    }
+  }
   LOG_INFO("inserted all records into new index. table=%s, index=%s", table_meta_->name(), index_name);
 
   indexes_.push_back(index);
@@ -325,8 +338,10 @@ RC HeapTableEngine::open()
       return RC::INTERNAL;
     }
 
-    BplusTreeIndex *index      = new BplusTreeIndex();
-    string          index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
+    Index *index = index_meta->is_vector_index() ?
+        static_cast<Index *>(new IvfflatIndex()) :
+        static_cast<Index *>(new BplusTreeIndex());
+    string index_file = table_index_file(db_->path().c_str(), table_meta_->name(), index_meta->name());
 
     rc = index->open(table_, index_file.c_str(), *index_meta, *field_meta);
     if (rc != RC::SUCCESS) {

@@ -152,7 +152,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       order_by_units_copy.emplace_back(std::move(copy));
     }
 
-    order_by_oper = make_unique<OrderByLogicalOperator>(std::move(order_by_units_copy));
+    order_by_oper = make_unique<OrderByLogicalOperator>(std::move(order_by_units_copy), select_stmt->limit());
     if (*last_oper) {
       order_by_oper->add_child(std::move(*last_oper));
     }
